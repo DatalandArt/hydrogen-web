@@ -17,7 +17,7 @@ limitations under the License.
 
 import {RoomMember} from "./RoomMember.js";
 
-async function loadMembers({roomId, storage, txn}) {
+export async function loadMembers({roomId, storage, txn}) {
     if (!txn) {
         txn = await storage.readTxn([
             storage.storeNames.roomMembers,

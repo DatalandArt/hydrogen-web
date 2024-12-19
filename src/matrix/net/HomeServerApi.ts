@@ -34,6 +34,7 @@ type Options = {
     accessToken: string;
     request: RequestFunction;
     reconnector: Reconnector;
+    userId?: string;
 };
 
 type BaseRequestOptions = {
@@ -49,14 +50,16 @@ export class HomeServerApi {
     private _accessToken: string;
     private readonly _requestFn: RequestFunction;
     private readonly _reconnector: Reconnector;
+    private _userId: string;
 
-    constructor({homeserver, accessToken, request, reconnector}: Options) {
+    constructor({homeserver, accessToken, request, reconnector, userId}: Options) {
         // store these both in a closure somehow so it's harder to get at in case of XSS?
         // one could change the homeserver as well so the token gets sent there, so both must be protected from read/write
         this._homeserver = homeserver;
         this._accessToken = accessToken;
         this._requestFn = request;
         this._reconnector = reconnector;
+        this._userId = userId;
     }
 
     private _url(csPath: string, prefix: string = CS_R0_PREFIX): string {
@@ -183,6 +186,10 @@ export class HomeServerApi {
      */
     public updateAccessToken(token: string) {
         this._accessToken = token;
+    }
+
+    public setUserId(userId: string) {
+        this._userId = userId;
     }
 
     sync(since: string, filter: string, timeout: number, options?: BaseRequestOptions): IHomeServerRequest {
@@ -482,6 +489,14 @@ export class HomeServerApi {
 
     logout(options?: BaseRequestOptions): IHomeServerRequest {
         return this._post(`/logout`, {}, {}, options);
+    }
+
+    getPresence(userId: string, options?: BaseRequestOptions): IHomeServerRequest {
+        return this._get(`/presence/${encodeURIComponent(userId)}/status`, undefined, undefined, options);
+    }
+
+    setPresence(content: Record<string, any>, options?: BaseRequestOptions): IHomeServerRequest {
+        return this._put(`/presence/${encodeURIComponent(this._userId)}/status`, {}, content, options);
     }
 
     getDehydratedDevice(options: BaseRequestOptions = {}): IHomeServerRequest {

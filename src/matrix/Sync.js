@@ -218,6 +218,49 @@ export class Sync {
             sessionState, inviteStates, roomStates, archivedRoomStates, log));
 
         const toDeviceEvents = response.to_device?.events;
+        const presenceEvents = response.presence?.events;
+        
+        // Handle presence events at session level
+        if (presenceEvents?.length) {
+            if (this._logger) {
+                this._logger.log({
+                    l: "sync_presence_events",
+                    count: presenceEvents.length,
+                    events: presenceEvents
+                });
+            }
+            for (const event of presenceEvents) {
+                if (event.type === "m.presence") {
+                    if (this._logger) {
+                        this._logger.log({
+                            l: "processing_presence_event",
+                            event,
+                            roomCount: roomStates.length,
+                            allRoomsCount: this._session.rooms.size
+                        });
+                    }
+                    // Update presence in all joined rooms for this user
+                    const joinedRooms = Array.from(this._session.rooms.values())
+                        .filter(room => room.membership === "join");
+
+                    if (joinedRooms.length > 0) {
+                        if (this._logger) {
+                            this._logger.log({
+                                l: "updating_room_presence",
+                                userId: event.sender,
+                                presence: event.content.presence,
+                                joinedRoomCount: joinedRooms.length
+                            });
+                        }
+                        // Update presence in all joined rooms
+                        for (const room of joinedRooms) {
+                            room._presenceStore.handlePresenceEvent(event);
+                        }
+                    }
+                }
+            }
+        }
+
         return {
             syncToken: response.next_batch,
             roomStates,

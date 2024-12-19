@@ -108,7 +108,6 @@ export class Client {
         */
         const flows = options.flows;
         const result = {homeserver};
-        console.log(flows);
         for (const flow of flows) {
             if (flow.type === "m.login.password") {
                 result.password = (username, password) => new PasswordLoginMethod({homeserver, username, password});
