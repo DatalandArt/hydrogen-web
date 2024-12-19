@@ -26,6 +26,7 @@ import {AvatarView} from "../../AvatarView.js";
 import {CallView} from "./CallView";
 import { ErrorView } from "../../general/ErrorView";
 import {TypingIndicatorView} from "./TypingIndicatorView";
+import {PresenceIndicatorView} from "./PresenceIndicatorView";
 
 export class RoomView extends TemplateView {
     constructor(vm, viewClassForTile) {
@@ -57,6 +58,7 @@ export class RoomView extends TemplateView {
                         new TimelineLoadingView(vm);    // vm is just needed for i18n
                 }),
                 t.view(new TypingIndicatorView(vm)),
+                t.view(new PresenceIndicatorView(vm)),
                 t.mapView(vm => vm.composerViewModel, composerViewModel => {
                     switch (composerViewModel?.kind) {
                         case "composer":
