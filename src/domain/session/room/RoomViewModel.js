@@ -40,27 +40,96 @@ export class RoomViewModel extends ErrorReportViewModel {
         this._tileOptions = undefined;
         this._onRoomChange = this._onRoomChange.bind(this);
         this._composerVM = null;
-        this._typingUsers = this._room.typingUsers;
-        // Subscribe to typing users changes using defaultObserverWith
-        this.track(
-            this._typingUsers.subscribe({
+        this._typingUsers = this._room.typingUsers || null;
+        this._activeUsers = this._room.activeUsers || null;
+        if (this.platform?.logger) {
+            this.platform.logger.log({
+                l: "room_view_model_init",
+                roomId: this._room.id,
+                hasTypingUsers: !!this._typingUsers,
+                hasActiveUsers: !!this._activeUsers,
+                typingUsersType: this._typingUsers ? typeof this._typingUsers : "undefined",
+                activeUsersType: this._activeUsers ? typeof this._activeUsers : "undefined",
+                activeUsersArray: this._activeUsers?.array
+            });
+        }
+
+        // Track typing users
+        if (this._typingUsers) {
+            this.track(this._typingUsers.subscribe({
+                onAdd: () => this.emitChange("typingUsers"),
+                onRemove: () => this.emitChange("typingUsers"),
+                onUpdate: () => this.emitChange("typingUsers"),
+                onMove: () => this.emitChange("typingUsers"),
+                onReset: () => this.emitChange("typingUsers")
+            }));
+        }
+
+        // Track active users
+        if (this._activeUsers) {
+            this.track(this._activeUsers.subscribe({
                 onAdd: (idx, value) => {
-                    this.emitChange("typingUsers");
+                    if (this.platform?.logger) {
+                        this.platform.logger.log({
+                            l: "active_users_add",
+                            roomId: this._room.id,
+                            userId: value,
+                            idx,
+                            currentArray: this._activeUsers.array
+                        });
+                    }
+                    this.emitChange("activeUsers");
                 },
                 onRemove: (idx, value) => {
-                    this.emitChange("typingUsers");
+                    if (this.platform?.logger) {
+                        this.platform.logger.log({
+                            l: "active_users_remove",
+                            roomId: this._room.id,
+                            userId: value,
+                            idx,
+                            currentArray: this._activeUsers.array
+                        });
+                    }
+                    this.emitChange("activeUsers");
                 },
                 onUpdate: (idx, value) => {
-                    this.emitChange("typingUsers");
+                    if (this.platform?.logger) {
+                        this.platform.logger.log({
+                            l: "active_users_update",
+                            roomId: this._room.id,
+                            userId: value,
+                            idx,
+                            currentArray: this._activeUsers.array
+                        });
+                    }
+                    this.emitChange("activeUsers");
                 },
                 onMove: (fromIdx, toIdx, value) => {
-                    this.emitChange("typingUsers");
+                    if (this.platform?.logger) {
+                        this.platform.logger.log({
+                            l: "active_users_move",
+                            roomId: this._room.id,
+                            userId: value,
+                            fromIdx,
+                            toIdx,
+                            currentArray: this._activeUsers.array
+                        });
+                    }
+                    this.emitChange("activeUsers");
                 },
                 onReset: () => {
-                    this.emitChange("typingUsers");
-                },
-            }),
-        );
+                    if (this.platform?.logger) {
+                        this.platform.logger.log({
+                            l: "active_users_reset",
+                            roomId: this._room.id,
+                            currentArray: this._activeUsers.array
+                        });
+                    }
+                    this.emitChange("activeUsers");
+                }
+            }));
+        }
+        
         if (room.isArchived) {
             this._composerVM = this.track(new ArchivedViewModel(this.childOptions({archivedRoom: room})));
         } else {
@@ -215,6 +284,18 @@ export class RoomViewModel extends ErrorReportViewModel {
     }
     get typingUsers() {
         return this._typingUsers;
+    }
+
+    get activeUsers() {
+        if (this.platform?.logger) {
+            this.platform.logger.log({
+                l: "get_active_users",
+                hasActiveUsers: !!this._activeUsers,
+                activeUsersArray: this._activeUsers?.array,
+                activeUsersLength: this._activeUsers?.array?.length
+            });
+        }
+        return this._activeUsers;
     }
 
     async _getDisplayName(userId) {
@@ -524,26 +605,22 @@ export class RoomViewModel extends ErrorReportViewModel {
     }
 
     async _sendPicture(pic) {
-        this.logAndCatch('RoomViewModel.sendPicture', async (log) => {
+        this.logAndCatch("RoomViewModel.sendPicture", async (log) => {
             if (!this.platform.hasReadPixelPermission()) {
-                alert(
-                    'Please allow canvas image data access, so we can scale your images down.'
-                );
+                alert("Please allow canvas image data access, so we can scale your images down.");
                 return;
             }
             let image = await this.platform.getImageHandleFromImage(pic);
-            const limit = await this.platform.settingsStorage.getInt(
-                'sentImageSizeLimit'
-            );
+            const limit = await this.platform.settingsStorage.getInt("sentImageSizeLimit");
             if (limit && image.maxDimension > limit) {
                 const scaledImage = await image.scale(limit);
                 image.dispose();
                 image = scaledImage;
             }
-            const filename = image.name || image.src || 'Unknown';
+            const filename = image.name || image.src || "Unknown";
             const content = {
                 body: filename,
-                msgtype: 'm.image',
+                msgtype: "m.image",
                 info: imageToInfo(image),
             };
             const attachments = {
@@ -552,17 +629,9 @@ export class RoomViewModel extends ErrorReportViewModel {
             if (image.maxDimension > 600) {
                 const thumbnail = await image.scale(400);
                 content.info.thumbnail_info = imageToInfo(thumbnail);
-                attachments['info.thumbnail_url'] = this._room.createAttachment(
-                    thumbnail.blob,
-                    filename
-                );
+                attachments["info.thumbnail_url"] = this._room.createAttachment(thumbnail.blob, filename);
             }
-            await this._room.sendEvent(
-                'm.room.message',
-                content,
-                attachments,
-                log
-            );
+            await this._room.sendEvent("m.room.message", content, attachments, log);
         });
     }
 
