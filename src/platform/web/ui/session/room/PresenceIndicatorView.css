@@ -1,0 +1,20 @@
+.room-presence-container {
+    min-height: 20px;
+    padding: 4px 8px;
+    display: block;
+}
+
+.PresenceIndicator {
+    font-size: 0.8em;
+    color: var(--secondary-content);
+    display: block;
+}
+
+.PresenceIndicator .presence {
+    opacity: 0.7;
+    display: block;
+}
+
+.PresenceIndicator .presence.hidden {
+    display: none;
+}
