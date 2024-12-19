@@ -21,7 +21,7 @@ import {RelationWriter} from "./timeline/persistence/RelationWriter.js";
 import {Timeline} from "./timeline/Timeline.js";
 import {FragmentIdComparer} from "./timeline/FragmentIdComparer.js";
 import {WrappedError} from "../error.js"
-import {fetchOrLoadMembers, fetchOrLoadMember} from "./members/load.js";
+import {fetchOrLoadMembers, fetchOrLoadMember, loadMembers} from "./members/load.js";
 import {MemberList} from "./members/MemberList.js";
 import {Heroes} from "./members/Heroes.js";
 import {EventEntry} from "./timeline/entries/EventEntry.js";
@@ -33,6 +33,7 @@ import {RetainedObservableValue} from "../../observable/value";
 import {TimelineReader} from "./timeline/persistence/TimelineReader";
 import {ObservedStateTypeMap} from "./state/ObservedStateTypeMap";
 import {ObservedStateKeyValue} from "./state/ObservedStateKeyValue";
+import {RoomPresenceStore} from "./RoomPresenceStore.js";
 
 const EVENT_ENCRYPTED_TYPE = "m.room.encrypted";
 
@@ -60,6 +61,11 @@ export class BaseRoom extends EventEmitter {
         this._powerLevelLoading = null;
         this._observedMembers = null;
         this._timelineLoadPromise = null;
+        this._presenceStore = new RoomPresenceStore({logger: platform.logger});
+    }
+
+    get presenceStore() {
+        return this._presenceStore;
     }
 
     async observeStateType(type, txn = undefined) {
@@ -408,6 +414,10 @@ export class BaseRoom extends EventEmitter {
         return this._typingStore.typingUserIds;
     }
 
+    get activeUsers() {
+        return this._presenceStore.activeUserIds;
+    }
+
     get avatarUrl() {
         if (this._summary.data.avatarUrl) {
             return this._summary.data.avatarUrl;
@@ -566,6 +576,55 @@ export class BaseRoom extends EventEmitter {
                 this._timeline.retain();
                 return this._timeline;
             }
+            // Fetch presence for room members when timeline is opened
+            try {
+                const members = await loadMembers({
+                    roomId: this.id,
+                    storage: this._storage
+                });
+                
+                if (members?.length) {
+                    const joinedMembers = members.filter(member => member?.membership === "join");
+                    if (joinedMembers.length > 0 && this._presenceStore) {
+                        // Initialize presence store with current members
+                        this._presenceStore.initializeMembers(joinedMembers);
+                        console.log("[BaseRoom] Fetching presence for", joinedMembers.length, "members");
+                        // Fetch initial presence for all members
+                        const presencePromises = joinedMembers.map(member => ({
+                            userId: member.userId,
+                            promise: this._hsApi.getPresence(member.userId).response()
+                        }));
+
+                        // Wait for all presence requests to complete
+                        const results = await Promise.all(presencePromises.map(p => p.promise));
+                        
+                        console.log("[BaseRoom] Got presence responses:", results.length);
+                        // Process each presence response
+                        for (let i = 0; i < results.length; i++) {
+                            const presence = results[i];
+                            const userId = presencePromises[i].userId;
+                            
+                            if (!presence) continue;  // Skip failed requests
+                            
+                            const event = {
+                                type: "m.presence",
+                                sender: userId,
+                                content: {
+                                    presence: presence.presence,
+                                    last_active_ago: presence.last_active_ago,
+                                    currently_active: presence.currently_active,
+                                    status_msg: presence.status_msg
+                                }
+                            };
+                            
+                            this._presenceStore.handlePresenceEvent(event);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn("[BaseRoom] Failed to fetch presence for room members:", err);
+            }
+
             this._timeline = new Timeline({
                 roomId: this.id,
                 storage: this._storage,

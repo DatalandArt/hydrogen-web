@@ -26,9 +26,12 @@ import {DecryptionSource} from "../e2ee/common";
 import {iterateResponseStateEvents} from "./common";
 import {PowerLevels, EVENT_TYPE as POWERLEVELS_EVENT_TYPE } from "./PowerLevels.js";
 import {RoomTypingStore} from "./RoomTypingStore.js";
+import {RoomPresenceStore} from "./RoomPresenceStore.js";
+import {loadMembers} from "./members/load.js";
 
 const EVENT_ENCRYPTED_TYPE = "m.room.encrypted";
 const EVENT_TYPING_TYPE = "m.typing";
+const EVENT_PRESENCE_TYPE = "m.presence";
 
 export class Room extends BaseRoom {
     constructor(options) {
@@ -37,6 +40,7 @@ export class Room extends BaseRoom {
         // TODO: pass pendingEvents to start like pendingOperations?
         const {pendingEvents} = options;
         this._typingStore = new RoomTypingStore({logger: this._platform.logger});
+        this._presenceStore = new RoomPresenceStore({logger: this._platform.logger});
         const relationWriter = new RelationWriter({
             roomId: this.id,
             fragmentIdComparer: this._fragmentIdComparer,
@@ -239,6 +243,20 @@ export class Room extends BaseRoom {
                     }
                 }
             }
+            // Update presence store with member changes
+            this._presenceStore.updateRoomMembers(memberChanges);
+
+            // Fetch presence for members after member changes
+            const members = Array.from(memberChanges.values())
+                .filter(change => change.member?.membership === "join")
+                .map(change => change.member);
+            
+            if (members.length > 0) {
+                // Use _fetchPresenceForMembers but don't await to avoid blocking sync
+                this._fetchPresenceForMembers(members).catch(err => {
+                    console.warn("[Room] Failed to fetch presence for members:", err);
+                });
+            }
         }
         let emitChange = false;
         if (summaryChanges) {
@@ -341,19 +359,161 @@ export class Room extends BaseRoom {
     }
 
     /** @package */
-    start(pendingOperations, parentLog) {
+    async start(pendingOperations, parentLog) {
         if (this._roomEncryption) {
             const roomKeyShares = pendingOperations?.get("share_room_key");
             if (roomKeyShares) {
                 // if we got interrupted last time sending keys to newly joined members
-                parentLog.wrapDetached("flush room keys", log => {
+                await parentLog.wrap("flush room keys", async log => {
                     log.set("id", this.id);
-                    return this._roomEncryption.flushPendingRoomKeyShares(this._hsApi, roomKeyShares, log);
+                    return await this._roomEncryption.flushPendingRoomKeyShares(this._hsApi, roomKeyShares, log);
                 });
             }
         }
+
+
         
         this._sendQueue.resumeSending(parentLog);
+    }
+
+    async _fetchPresenceForMembers(members, log) {
+        try {
+            if (log) {
+                log.log({
+                    l: "fetch_presence_debug",
+                    membersType: typeof members,
+                    hasMembers: !!members,
+                    membersFor: members?.for ? "yes" : "no",
+                });
+            }
+
+            // Get joined members with valid user IDs
+            const joinedMembers = [];
+            
+            // Handle the case where members is a Map-like object with a 'for' method
+            if (members?.for) {
+                for await (const {userId, member} of members) {
+                    if (log) {
+                        log.log({
+                            l: "processing_member",
+                            userId,
+                            membership: member?.membership
+                        });
+                    }
+                    
+                    if (member?.membership === "join") {
+                        const isValidUserId = typeof userId === "string" && userId.startsWith("@") && userId.includes(":");
+                        if (!isValidUserId) {
+                            if (log) {
+                                log.log({
+                                    l: "invalid_user_id",
+                                    userId,
+                                    type: typeof userId,
+                                    membership: member.membership
+                                });
+                            }
+                            continue;
+                        }
+                        joinedMembers.push([userId, member]);
+                    }
+                }
+            } else {
+                if (log) {
+                    log.log({
+                        l: "invalid_members_object",
+                        membersType: typeof members
+                    });
+                }
+                return;
+            }
+
+            if (log) {
+                log.log({
+                    l: "fetching_presence_start",
+                    totalMembers: members.size,
+                    joinedValidMembers: joinedMembers.length
+                });
+            }
+
+            // No valid members to fetch presence for
+            if (joinedMembers.length === 0) {
+                if (log) {
+                    log.log({
+                        l: "no_valid_members_for_presence"
+                    });
+                }
+                return;
+            }
+
+            // Fetch presence for each valid member
+            const presencePromises = joinedMembers.map(([userId]) => ({
+                userId,
+                promise: this._hsApi.getPresence(userId).response()
+                    .catch(err => {
+                        if (log) {
+                            log.log({
+                                l: "presence_fetch_error_single",
+                                userId,
+                                error: err.message
+                            });
+                        }
+                        return null;
+                    })
+            }));
+
+            // Wait for all presence requests to complete
+            const results = await Promise.all(presencePromises.map(p => p.promise));
+            let successCount = 0;
+
+            // Process results
+            for (let i = 0; i < results.length; i++) {
+                const presence = results[i];
+                const userId = presencePromises[i].userId;
+
+                if (!presence) continue;  // Skip failed requests
+
+                const event = {
+                    type: EVENT_PRESENCE_TYPE,
+                    sender: userId,
+                    content: {
+                        presence: presence.presence,
+                        last_active_ago: presence.last_active_ago,
+                        currently_active: presence.currently_active,
+                        status_msg: presence.status_msg
+                    }
+                };
+
+                if (log) {
+                    log.log({
+                        l: "presence_fetch_success",
+                        userId,
+                        presence: presence.presence,
+                        currently_active: presence.currently_active
+                    });
+                }
+
+                this._presenceStore.handlePresenceEvent(event);
+                successCount++;
+            }
+
+            if (log) {
+                log.log({
+                    l: "presence_fetch_complete",
+                    totalAttempted: joinedMembers.length,
+                    successCount,
+                    failureCount: joinedMembers.length - successCount
+                });
+            }
+        } catch (err) {
+            if (log) {
+                log.log({
+                    l: "presence_fetch_error",
+                    error: err.message,
+                    stack: err.stack
+                });
+            }
+            console.warn("Could not fetch presence for room members:", err);
+        }
     }
 
     /** @package */
@@ -361,9 +521,22 @@ export class Room extends BaseRoom {
         try {
             await super.load(summary, txn, log);
             await this._syncWriter.load(txn, log);
+            // Initialize presence store with current room members
+            const members = await txn.roomMembers.getAll(this.id);
+            this._presenceStore.initializeMembers(members);
+            // Fetch initial presence for all members
+            await this._fetchPresenceForMembers(members, log);
         } catch (err) {
             throw new WrappedError(`Could not load room ${this._roomId}`, err);
         }
+    }
+
+    get typingUsers() {
+        return this._typingStore.typingUserIds;
+    }
+
+    get activeUsers() {
+        return this._presenceStore.activeUserIds;
     }
 
     async _writeGapFill(gapChunk, txn, log) {
@@ -507,14 +680,42 @@ export class Room extends BaseRoom {
                 handler.handleStateEvent(event);
             }
         });
-        // Handle typing events
+        // Handle typing and presence events
         if (roomResponse.ephemeral?.events) {
+            if (this._platform.logger) {
+                this._platform.logger.log({
+                    l: "room_ephemeral_events",
+                    roomId: this.id,
+                    events: roomResponse.ephemeral.events
+                });
+            }
             for (const event of roomResponse.ephemeral.events) {
                 if (event.type === EVENT_TYPING_TYPE) {
                     this._typingStore.handleTypingEvent(event.content);
+                } else if (event.type === EVENT_PRESENCE_TYPE) {
+                    if (this._platform.logger) {
+                        this._platform.logger.log({
+                            l: "handle_presence_event",
+                            roomId: this.id,
+                            event
+                        });
+                    }
+                    this._presenceStore.handlePresenceEvent(event);
                 }
             }
         }
+        
+        // Also log the entire sync response if debug logging is enabled
+        if (this._platform.logger) {
+            this._platform.logger.log({
+                l: "room_sync_response",
+                roomId: this.id,
+                hasEphemeral: !!roomResponse.ephemeral,
+                hasPresence: !!roomResponse.presence,
+                response: roomResponse
+            });
+        }
+
     }
 
     /** @package */
