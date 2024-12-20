@@ -1,0 +1,73 @@
+diff --git a/src/matrix/room/BaseRoom.js b/src/matrix/room/BaseRoom.js
+index cf3fe36f..fd090794 100644
+--- a/src/matrix/room/BaseRoom.js
++++ b/src/matrix/room/BaseRoom.js
+@@ -404,6 +404,10 @@ export class BaseRoom extends EventEmitter {
+         return this._roomId;
+     }
+ 
++    get typingUsers() {
++        return this._typingStore.typingUserIds;
++    }
++
+     get avatarUrl() {
+         if (this._summary.data.avatarUrl) {
+             return this._summary.data.avatarUrl;
+diff --git a/src/matrix/room/Room.js b/src/matrix/room/Room.js
+index ea8fe690..1ee4347e 100644
+--- a/src/matrix/room/Room.js
++++ b/src/matrix/room/Room.js
+@@ -25,8 +25,10 @@ import {AttachmentUpload} from "./AttachmentUpload.js";
+ import {DecryptionSource} from "../e2ee/common";
+ import {iterateResponseStateEvents} from "./common";
+ import {PowerLevels, EVENT_TYPE as POWERLEVELS_EVENT_TYPE } from "./PowerLevels.js";
++import {RoomTypingStore} from "./RoomTypingStore.js";
+ 
+ const EVENT_ENCRYPTED_TYPE = "m.room.encrypted";
++const EVENT_TYPING_TYPE = "m.typing";
+ 
+ export class Room extends BaseRoom {
+     constructor(options) {
+@@ -34,6 +36,7 @@ export class Room extends BaseRoom {
+         this._roomStateHandler = options.roomStateHandler;
+         // TODO: pass pendingEvents to start like pendingOperations?
+         const {pendingEvents} = options;
++        this._typingStore = new RoomTypingStore({logger: this._platform.logger});
+         const relationWriter = new RelationWriter({
+             roomId: this.id,
+             fragmentIdComparer: this._fragmentIdComparer,
+@@ -504,6 +507,14 @@ export class Room extends BaseRoom {
+                 handler.handleStateEvent(event);
+             }
+         });
++        // Handle typing events
++        if (roomResponse.ephemeral?.events) {
++            for (const event of roomResponse.ephemeral.events) {
++                if (event.type === EVENT_TYPING_TYPE) {
++                    this._typingStore.handleTypingEvent(event.content);
++                }
++            }
++        }
+     }
+ 
+     /** @package */
+diff --git a/src/platform/web/ui/session/room/RoomView.js b/src/platform/web/ui/session/room/RoomView.js
+index 727fb44d..a2660c42 100644
+--- a/src/platform/web/ui/session/room/RoomView.js
++++ b/src/platform/web/ui/session/room/RoomView.js
+@@ -25,6 +25,7 @@ import {DisabledComposerView} from "./DisabledComposerView.js";
+ import {AvatarView} from "../../AvatarView.js";
+ import {CallView} from "./CallView";
+ import { ErrorView } from "../../general/ErrorView";
++import {TypingIndicatorView} from "./TypingIndicatorView";
+ 
+ export class RoomView extends TemplateView {
+     constructor(vm, viewClassForTile) {
+@@ -55,6 +56,7 @@ export class RoomView extends TemplateView {
+                         new TimelineView(timelineViewModel, this._viewClassForTile) :
+                         new TimelineLoadingView(vm);    // vm is just needed for i18n
+                 }),
++                t.view(new TypingIndicatorView(vm)),
+                 t.mapView(vm => vm.composerViewModel, composerViewModel => {
+                     switch (composerViewModel?.kind) {
+                         case "composer":

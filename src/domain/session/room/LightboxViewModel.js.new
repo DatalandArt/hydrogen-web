@@ -1,0 +1,57 @@
+/*
+Copyright 2020 The Matrix.org Foundation C.I.C.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+import {ViewModel} from "../../../lib/ViewModel";
+
+export class LightboxViewModel extends ViewModel {
+    constructor(options) {
+        super(options);
+        const {eventId, roomId, imageUrl, thumbnailUrl, label, sender, timestamp} = options;
+        this._eventId = eventId;
+        this._roomId = roomId;
+        this._imageUrl = imageUrl || thumbnailUrl; // Fallback to thumbnail if full image not available
+        this._name = label;
+        this._sender = sender;
+        this._timestamp = timestamp;
+        this._onClose = options.onClose;
+    }
+
+    get name() {
+        return this._name;
+    }
+
+    get imageUrl() {
+        return this._imageUrl;
+    }
+
+    get sender() {
+        return this._sender;
+    }
+
+    get time() {
+        return this._timestamp ? new Date(this._timestamp).toLocaleTimeString() : "";
+    }
+
+    get date() {
+        return this._timestamp ? new Date(this._timestamp).toLocaleDateString() : "";
+    }
+
+    close() {
+        if (this._onClose) {
+            this._onClose();
+        }
+    }
+}

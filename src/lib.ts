@@ -53,7 +53,7 @@ export type {ILogItem} from "./logging/types";
 // export {RoomView} from "./platform/web/ui/session/room/RoomView.js";
 // export {StaticView} from "./platform/web/ui/general/StaticView.js";
 // export {RightPanelView} from "./platform/web/ui/session/rightpanel/RightPanelView.js";
-// export {LightboxView} from "./platform/web/ui/session/room/LightboxView.js";
+export {LightboxView} from "./platform/web/ui/session/room/LightboxView.js";
 // export {ListView} from "./platform/web/ui/general/ListView";
 // export {RoomBeingCreatedView} from "./platform/web/ui/session/room/RoomBeingCreatedView.js";
 // export {UnknownRoomView} from "./platform/web/ui/session/room/UnknownRoomView.js";
@@ -84,8 +84,6 @@ export type {ILogItem} from "./logging/types";
 // // export right-panel view models/ views
 // export {MemberListViewModel} from "./domain/session/rightpanel/MemberListViewModel.js";
 // export {MemberListView} from "./platform/web/ui/session/rightpanel/MemberListView.js";
-
-
 
 // export type {TileViewConstructor, ViewClassForEntryFn} from "./platform/web/ui/session/room/TimelineView";
 // // export timeline tile views

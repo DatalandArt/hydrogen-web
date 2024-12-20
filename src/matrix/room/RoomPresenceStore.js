@@ -30,35 +30,54 @@ export class RoomPresenceStore {
     }
 
     updateRoomMembers(memberChanges) {
-        console.log("[RoomPresenceStore] Updating room members. Current members:", Array.from(this._roomMembers));
-        
+        this._logger?.run("RoomPresenceStore.updateRoomMembers", log => {
+            log.set("currentMembers", Array.from(this._roomMembers));
+            log.log({l: "Updating room members"}, log.level.Detail);
+        });
+
         for (const [userId, memberChange] of memberChanges.entries()) {
             if (!memberChange?.member?.userId) {
-                console.log("[RoomPresenceStore] Skipping invalid member change:", {userId, memberChange});
+                this._logger?.run("RoomPresenceStore.updateRoomMembers", log => {
+                    log.set("userId", userId);
+                    log.set("memberChange", memberChange);
+                    log.log({l: "Skipping invalid member change"}, log.level.Warn);
+                });
                 continue;
             }
 
             const membership = memberChange.member.membership;
             const actualUserId = memberChange.member.userId;
 
-            console.log("[RoomPresenceStore] Processing member change:", {
-                userId,
-                actualUserId,
-                membership,
-                memberChange
+            this._logger?.run("RoomPresenceStore.updateRoomMembers", log => {
+                log.set("userId", userId);
+                log.set("actualUserId", actualUserId);
+                log.set("membership", membership);
+                log.set("memberChange", memberChange);
+                log.log({l: "Processing member change"}, log.level.Detail);
             });
-            
+
             if (membership === "join") {
                 this._roomMembers.add(actualUserId);
-                console.log(`[RoomPresenceStore] Added member ${actualUserId}. Current members:`, Array.from(this._roomMembers));
+                this._logger?.run("RoomPresenceStore.updateRoomMembers", log => {
+                    log.set("userId", actualUserId);
+                    log.set("currentMembers", Array.from(this._roomMembers));
+                    log.log({l: "Added member"}, log.level.Detail);
+                });
             } else {
                 const wasPresent = this._roomMembers.delete(actualUserId);
-                console.log(`[RoomPresenceStore] Removed member ${actualUserId} (was present: ${wasPresent})`);
+                this._logger?.run("RoomPresenceStore.updateRoomMembers", log => {
+                    log.set("userId", actualUserId);
+                    log.set("wasPresent", wasPresent);
+                    log.log({l: "Removed member"}, log.level.Detail);
+                });
                 // If a member leaves, remove them from active users
                 const idx = this._activeUserIds.array.indexOf(actualUserId);
                 if (idx !== -1) {
                     this._activeUserIds.remove(idx);
-                    console.log(`[RoomPresenceStore] Removed ${actualUserId} from active users`);
+                    this._logger?.run("RoomPresenceStore.updateRoomMembers", log => {
+                        log.set("userId", actualUserId);
+                        log.log({l: "Removed from active users"}, log.level.Detail);
+                    });
                 }
             }
         }
@@ -69,49 +88,41 @@ export class RoomPresenceStore {
         const {presence, currently_active: currentlyActive, last_active_ago} = content;
 
         if (!sender || !sender.startsWith("@")) {
-            console.log("[RoomPresenceStore] Invalid sender in presence event:", sender);
+            this._logger?.run("RoomPresenceStore.handlePresenceEvent", log => {
+                log.set("sender", sender);
+                log.log({l: "Invalid sender in presence event"}, log.level.Warn);
+            });
             return;
         }
 
         // Only track presence for room members
         if (!this._roomMembers.has(sender)) {
-            console.log("[RoomPresenceStore] Ignoring presence for non-room member:", sender);
+            this._logger?.run("RoomPresenceStore.handlePresenceEvent", log => {
+                log.set("sender", sender);
+                log.log({l: "Ignoring presence for non-room member"}, log.level.Detail);
+            });
             return;
         }
 
         const currentTime = Date.now();
-        const lastUpdate = this._lastUpdateTime.get(sender) || 0;
-        const updateDelta = currentTime - lastUpdate;
-
-        // Deduplicate events that are too close together (within 1 second)
-        if (updateDelta < 1000) {
-            console.log("[RoomPresenceStore] Ignoring duplicate presence event for", sender, "delta:", updateDelta);
-            return;
-        }
 
         const lastPresence = this._lastPresenceByUser.get(sender);
         const isNowActive = presence === "online" || (presence === "unavailable" && currentlyActive === true);
         const wasActive = this._activeUserIds.array.includes(sender);
 
-        console.log("[RoomPresenceStore] Processing presence:", {
-            sender,
-            presence,
-            currentlyActive,
-            last_active_ago,
-            lastPresence,
-            wasActive,
-            isNowActive,
-            currentActiveUsers: this._activeUserIds.array.slice(),
-            updateDelta
+        this._logger?.run("RoomPresenceStore.handlePresenceEvent", log => {
+            log.set("sender", sender);
+            log.set("presence", presence);
+            log.set("currentlyActive", currentlyActive);
+            log.set("lastActiveAgo", last_active_ago);
+            log.set("lastPresence", lastPresence);
+            log.set("wasActive", wasActive);
+            log.set("isNowActive", isNowActive);
+            log.set("currentActiveUsers", this._activeUserIds.array.slice());
+            log.log({l: "Processing presence"}, log.level.Detail);
         });
 
         // Only update if there's an actual change in presence state
-        if (lastPresence?.presence === presence && 
-            lastPresence?.currentlyActive === currentlyActive) {
-            console.log("[RoomPresenceStore] No change in presence state for:", sender);
-            return;
-        }
-
         // Update tracking
         this._lastPresenceByUser.set(sender, {presence, currentlyActive});
         this._lastUpdateTime.set(sender, currentTime);
@@ -121,21 +132,32 @@ export class RoomPresenceStore {
             const idx = this._activeUserIds.array.indexOf(sender);
             if (idx !== -1) {
                 this._activeUserIds.remove(idx);
-                console.log("[RoomPresenceStore] Removed user from active list:", sender);
+                this._logger?.run("RoomPresenceStore.handlePresenceEvent", log => {
+                    log.set("sender", sender);
+                    log.log({l: "Removed user from active list"}, log.level.Detail);
+                });
             }
         } else if (!wasActive && isNowActive) {
             if (!this._activeUserIds.array.includes(sender)) {
                 this._activeUserIds.append(sender);
-                console.log("[RoomPresenceStore] Added user to active list:", sender);
+                this._logger?.run("RoomPresenceStore.handlePresenceEvent", log => {
+                    log.set("sender", sender);
+                    log.log({l: "Added user to active list"}, log.level.Detail);
+                });
             }
         }
 
-        console.log("[RoomPresenceStore] Active users after update:", this._activeUserIds.array.slice());
+        this._logger?.run("RoomPresenceStore.handlePresenceEvent", log => {
+            log.set("activeUsers", this._activeUserIds.array.slice());
+            log.log({l: "Active users after update"}, log.level.Detail);
+        });
     }
 
     initializeMembers(members) {
         if (!members) {
-            console.log("[RoomPresenceStore] No members provided to initialize");
+            this._logger?.run("RoomPresenceStore.initializeMembers", log => {
+                log.log({l: "No members provided to initialize"}, log.level.Warn);
+            });
             return;
         }
 
@@ -145,17 +167,17 @@ export class RoomPresenceStore {
         }
 
         // Handle both array and Map cases
-        const memberEntries = members instanceof Map ? 
-            Array.from(members.entries()) : 
-            members.map(member => [member.userId, member]);
+        const memberEntries =
+            members instanceof Map ? Array.from(members.entries()) : members.map((member) => [member.userId, member]);
 
-        console.log("[RoomPresenceStore] Initializing members:", {
-            totalMembers: memberEntries.length,
-            members: memberEntries.map(([id, m]) => ({
+        this._logger?.run("RoomPresenceStore.initializeMembers", log => {
+            log.set("totalMembers", memberEntries.length);
+            log.set("members", memberEntries.map(([id, m]) => ({
                 id,
                 userId: m.userId,
-                membership: m.membership
-            }))
+                membership: m.membership,
+            })));
+            log.log({l: "Initializing members"}, log.level.Detail);
         });
 
         for (const [, member] of memberEntries) {
@@ -163,20 +185,27 @@ export class RoomPresenceStore {
                 this._roomMembers.add(member.userId);
             }
         }
-        
-        console.log("[RoomPresenceStore] After initialization:", {
-            roomMembers: Array.from(this._roomMembers),
-            activeUsers: this._activeUserIds.array
+
+        this._logger?.run("RoomPresenceStore.initializeMembers", log => {
+            log.set("roomMembers", Array.from(this._roomMembers));
+            log.set("activeUsers", this._activeUserIds.array);
+            log.log({l: "After initialization"}, log.level.Detail);
         });
     }
 
     handleBulkPresenceEvents(presenceEvents) {
         if (!Array.isArray(presenceEvents)) {
-            console.log("[RoomPresenceStore] Invalid presenceEvents:", presenceEvents);
+            this._logger?.run("RoomPresenceStore.handleBulkPresenceEvents", log => {
+                log.set("presenceEvents", presenceEvents);
+                log.log({l: "Invalid presenceEvents"}, log.level.Warn);
+            });
             return;
         }
 
-        console.log("[RoomPresenceStore] Processing bulk presence events:", presenceEvents.length);
+        this._logger?.run("RoomPresenceStore.handleBulkPresenceEvents", log => {
+            log.set("eventCount", presenceEvents.length);
+            log.log({l: "Processing bulk presence events"}, log.level.Detail);
+        });
         for (const presence of presenceEvents) {
             const event = {
                 type: "m.presence",
@@ -185,8 +214,8 @@ export class RoomPresenceStore {
                     presence: presence.presence,
                     currently_active: presence.currently_active,
                     last_active_ago: presence.last_active_ago,
-                    status_msg: presence.status_msg
-                }
+                    status_msg: presence.status_msg,
+                },
             };
             this.handlePresenceEvent(event);
         }
@@ -199,4 +228,3 @@ export class RoomPresenceStore {
         }
     }
 }
-

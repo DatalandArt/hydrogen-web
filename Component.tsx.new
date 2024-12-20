@@ -1,0 +1,122 @@
+// ... (previous imports and types remain the same)
+
+export default function Component({
+  // ... (props remain the same)
+}) {
+  // ... (previous state and refs remain the same)
+
+  function mount() {
+    if (!isLoaded) {
+      return;
+    }
+
+    let textarea: HTMLTextAreaElement | null | undefined;
+    let submit: HTMLButtonElement | null | undefined;
+    let vm: any,
+      features: any,
+      view: any,
+      composer: any,
+      unsubscribeTypingUsers: any,
+      unsubscribeActiveUsers: any;
+    const container = domElement.current;
+
+    if (client && platform && router && navigation) {
+      setup(client, platform, router, navigation);
+    }
+
+    return unmount;
+
+    async function setup(
+      client: ClientType,
+      platform: PlatformType,
+      router: RouterType,
+      navigation: NavigationType
+    ) {
+      // ... (previous setup code remains the same until TimelineView creation)
+
+      view = new TimelineView(vm.timelineViewModel, viewClassForTile);
+      const viewRoot = view.mount();
+
+      console.log('Component: Setting up lightbox event listener on', viewRoot);
+      
+      // Add click event listener to catch all clicks
+      viewRoot.addEventListener('click', (event: any) => {
+        console.log('Component: click event on viewRoot', event.target);
+        if (event.target.closest('.timeline-image-link')) {
+          console.log('Component: click on image link');
+          // Try creating the lightbox directly on image click
+          const img = event.target.closest('.timeline-image-link').querySelector('img');
+          if (img) {
+            console.log('Component: creating lightbox from click');
+            const lightboxVM = {
+              imageUrl: img.src,
+              name: img.alt,
+              sender: 'Unknown',  // We'll need to get this from the tile
+              time: new Date().toLocaleTimeString(),
+              date: new Date().toLocaleDateString(),
+              close: () => {
+                console.log('Component: closing lightbox');
+                if (lightboxView) {
+                  lightboxView.unmount();
+                  document.body.removeChild(lightboxView.root());
+                  setLightboxView(null);
+                }
+              }
+            };
+
+            const newLightboxView = new LightboxView(lightboxVM);
+            document.body.appendChild(newLightboxView.mount());
+            setLightboxView(newLightboxView);
+          }
+        }
+      });
+
+      // Add lightbox event listener
+      viewRoot.addEventListener('hydrogen:lightbox', (event: any) => {
+        console.log('Component: lightbox event received', event.detail);
+        const { imageUrl, thumbnailUrl, label, sender, timestamp } = event.detail;
+        
+        // Create lightbox view model
+        const lightboxVM = {
+          imageUrl: imageUrl || thumbnailUrl,
+          name: label,
+          sender,
+          time: new Date(timestamp).toLocaleTimeString(),
+          date: new Date(timestamp).toLocaleDateString(),
+          close: () => {
+            console.log('Component: closing lightbox');
+            if (lightboxView) {
+              lightboxView.unmount();
+              document.body.removeChild(lightboxView.root());
+              setLightboxView(null);
+            }
+          }
+        };
+
+        console.log('Component: creating lightbox view');
+        // Create and mount lightbox view
+        const newLightboxView = new LightboxView(lightboxVM);
+        document.body.appendChild(newLightboxView.mount());
+        setLightboxView(newLightboxView);
+      });
+
+      // Also try listening on the container
+      container?.addEventListener('hydrogen:lightbox', (event: any) => {
+        console.log('Component: lightbox event received on container', event.detail);
+      });
+
+      // And on document body
+      document.body.addEventListener('hydrogen:lightbox', (event: any) => {
+        console.log('Component: lightbox event received on document.body', event.detail);
+      });
+
+      container?.appendChild(viewRoot);
+
+      // ... (rest of the setup code remains the same)
+    }
+
+    // ... (rest of the component code remains the same)
+  }
+
+  // ... (rest of the component code remains the same)
+}

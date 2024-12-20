@@ -176,11 +176,14 @@ export class RoomViewModel extends ErrorReportViewModel {
             this._room.on("change", this._onRoomChange);
             const timeline = await this._room.openTimeline(log);
             this.track(() => timeline.release());
+            const imageSizeConfig = this.getOption("imageSizeConfig") || {};
             this._tileOptions = this.childOptions({
                 session: this.getOption("session"),
                 roomVM: this,
                 timeline,
                 tileClassForEntry: this._tileClassForEntry,
+                maxImageWidth: imageSizeConfig.maxWidth,
+                maxImageHeight: imageSizeConfig.maxHeight,
             });
             this._timelineVM = this.track(
                 new TimelineViewModel(

@@ -133,19 +133,47 @@ export class TimelineReader {
     }
 
     async readById(id, log) {
+        console.log("[TimelineReader] Reading event by ID:", {
+            id,
+            roomId: this._roomId,
+            hasDecryptEntries: !!this._decryptEntries
+        });
         let stores = [this._storage.storeNames.timelineEvents];
         if (this._decryptEntries) {
             stores.push(this._storage.storeNames.inboundGroupSessions);
         }
         const txn = await this._storage.readTxn(stores); // todo: can we just use this.readTxnStores here? probably
-        const storageEntry = await txn.timelineEvents.getByEventId(this._roomId, id);
-        if (storageEntry) {
-            const entry = new EventEntry(storageEntry, this._fragmentIdComparer);
-            if (this._decryptEntries) {
-                const request = this._decryptEntries([entry], txn, log);
-                await request.complete();
+        try {
+            const storageEntry = await txn.timelineEvents.getByEventId(this._roomId, id);
+            console.log("[TimelineReader] Storage lookup result:", {
+                id,
+                found: !!storageEntry,
+                type: storageEntry?.event?.type,
+                hasContent: !!storageEntry?.event?.content
+            });
+            if (storageEntry) {
+                const entry = new EventEntry(storageEntry, this._fragmentIdComparer);
+                if (this._decryptEntries) {
+                    console.log("[TimelineReader] Decrypting entry");
+                    const request = this._decryptEntries([entry], txn, log);
+                    await request.complete();
+                    console.log("[TimelineReader] Decryption complete");
+                }
+                console.log("[TimelineReader] Returning entry:", {
+                    id,
+                    type: entry.eventType,
+                    hasContent: !!entry.content
+                });
+                return entry;
             }
-            return entry;
+            console.log("[TimelineReader] No entry found for event:", id);
+            return null;
+        } catch (error) {
+            console.error("[TimelineReader] Error reading event:", {
+                id,
+                error
+            });
+            throw error;
         }
     }
 

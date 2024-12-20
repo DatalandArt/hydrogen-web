@@ -17,10 +17,14 @@ limitations under the License.
 
 import {BaseMessageTile} from "./BaseMessageTile.js";
 import {SendStatus} from "../../../../../matrix/room/sending/PendingEvent.js";
-const MAX_HEIGHT = 300;
-const MAX_WIDTH = 400;
-
 export class BaseMediaTile extends BaseMessageTile {
+    static DEFAULT_MAX_HEIGHT = 800;
+    static DEFAULT_MAX_WIDTH = 1200;
+    
+    static setDefaultLimits(maxWidth, maxHeight) {
+        BaseMediaTile.DEFAULT_MAX_WIDTH = maxWidth;
+        BaseMediaTile.DEFAULT_MAX_HEIGHT = maxHeight;
+    }
     constructor(entry, options) {
         super(entry, options);
         this._decryptedThumbnail = null;
@@ -29,6 +33,8 @@ export class BaseMediaTile extends BaseMessageTile {
         this._error = null;
         this._downloading = false;
         this._downloadError = null;
+        this._maxWidth = options?.maxWidth ?? BaseMediaTile.DEFAULT_MAX_WIDTH;
+        this._maxHeight = options?.maxHeight ?? BaseMediaTile.DEFAULT_MAX_HEIGHT;
     }
 
     async downloadMedia() {
@@ -183,11 +189,17 @@ export class BaseMediaTile extends BaseMessageTile {
 
     _scaleFactor() {
         const info = this._getContent()?.info;
-        const scaleHeightFactor = MAX_HEIGHT / info?.h;
-        const scaleWidthFactor = MAX_WIDTH / info?.w;
+        const scaleHeightFactor = this._maxHeight / info?.h;
+        const scaleWidthFactor = this._maxWidth / info?.w;
         // take the smallest scale factor, to respect all constraints
         // we should not upscale images, so limit scale factor to 1 upwards
         return Math.min(scaleWidthFactor, scaleHeightFactor, 1);
+    }
+
+    setImageLimits(maxWidth, maxHeight) {
+        this._maxWidth = maxWidth;
+        this._maxHeight = maxHeight;
+        this.emitChange("thumbnailUrl");
     }
 
     _isMainResourceImage() {

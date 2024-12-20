@@ -588,7 +588,10 @@ export class BaseRoom extends EventEmitter {
                     if (joinedMembers.length > 0 && this._presenceStore) {
                         // Initialize presence store with current members
                         this._presenceStore.initializeMembers(joinedMembers);
-                        console.log("[BaseRoom] Fetching presence for", joinedMembers.length, "members");
+                        this._platform.logger.run("BaseRoom.fetchPresence", log => {
+                            log.set("memberCount", joinedMembers.length);
+                            log.log({l: "Fetching presence"}, log.level.Detail);
+                        });
                         // Fetch initial presence for all members
                         const presencePromises = joinedMembers.map(member => ({
                             userId: member.userId,
@@ -598,7 +601,10 @@ export class BaseRoom extends EventEmitter {
                         // Wait for all presence requests to complete
                         const results = await Promise.all(presencePromises.map(p => p.promise));
                         
-                        console.log("[BaseRoom] Got presence responses:", results.length);
+                        this._platform.logger.run("BaseRoom.fetchPresence", log => {
+                            log.set("responseCount", results.length);
+                            log.log({l: "Got presence responses"}, log.level.Detail);
+                        });
                         // Process each presence response
                         for (let i = 0; i < results.length; i++) {
                             const presence = results[i];
@@ -662,6 +668,13 @@ export class BaseRoom extends EventEmitter {
     _getPendingEvents() { return null; }
 
     observeEvent(eventId) {
+        this._platform.logger.run("BaseRoom.observeEvent", log => {
+            log.set("eventId", eventId);
+            log.set("hasTimeline", !!this._timeline);
+            log.set("hasObservedEvents", !!this._observedEvents);
+            log.log({l: "observeEvent called"}, log.level.Detail);
+        });
+
         if (!this._observedEvents) {
             this._observedEvents = new ObservedEventMap(() => {
                 this._observedEvents = null;
@@ -670,14 +683,34 @@ export class BaseRoom extends EventEmitter {
         let entry = null;
         if (this._timeline) {
             entry = this._timeline.getByEventId(eventId);
+            this._platform.logger.run("BaseRoom.observeEvent", log => {
+                log.set("eventId", eventId);
+                log.set("foundInTimeline", !!entry);
+                log.log({l: "Timeline lookup result"}, log.level.Detail);
+            });
         }
         const observable = this._observedEvents.observe(eventId, entry);
         if (!entry) {
+            this._platform.logger.run("BaseRoom.observeEvent", log => {
+                log.set("eventId", eventId);
+                log.log({l: "Event not found in timeline, loading from storage"}, log.level.Detail);
+            });
             // update in the background
             this._readEventById(eventId).then(entry => {
+                this._platform.logger.run("BaseRoom.observeEvent", log => {
+                    log.set("eventId", eventId);
+                    log.set("hasEntry", !!entry);
+                    log.set("type", entry?.event?.type);
+                    log.set("content", entry?.event?.content);
+                    log.log({l: "Event loaded from storage"}, log.level.Detail);
+                });
                 observable.update(entry);
             }).catch(err => {
-                console.warn(`could not load event ${eventId} from storage`, err);
+                this._platform.logger.run("BaseRoom.observeEvent", log => {
+                    log.set("eventId", eventId);
+                    log.error = err;
+                    log.log({l: "Error loading event from storage"}, log.level.Error);
+                });
             });
         }
         return observable;

@@ -20,12 +20,7 @@ import {createEnum} from "../utils/enum";
 
 const INCREMENTAL_TIMEOUT = 30000;
 
-export const SyncStatus = createEnum(
-    "InitialSync",
-    "CatchupSync",
-    "Syncing",
-    "Stopped"
-);
+export const SyncStatus = createEnum("InitialSync", "CatchupSync", "Syncing", "Stopped");
 
 function timelineIsEmpty(roomResponse) {
     try {
@@ -87,70 +82,76 @@ export class Sync {
     }
 
     async _syncLoop(syncToken) {
-        // if syncToken is falsy, it will first do an initial sync ... 
-        while(this._status.get() !== SyncStatus.Stopped) {
+        // if syncToken is falsy, it will first do an initial sync ...
+        while (this._status.get() !== SyncStatus.Stopped) {
             let roomStates;
             let sessionChanges;
-            let wasCatchupOrInitial = this._status.get() === SyncStatus.CatchupSync || this._status.get() === SyncStatus.InitialSync;
-            await this._logger.run("sync", async log => {
-                log.set("token", syncToken);
-                log.set("status", this._status.get());
-                try {
-                    // unless we are happily syncing already, we want the server to return
-                    // as quickly as possible, even if there are no events queued. This
-                    // serves two purposes:
-                    //
-                    // * When the connection dies, we want to know asap when it comes back,
-                    //   so that we can hide the error from the user. (We don't want to
-                    //   have to wait for an event or a timeout).
-                    //
-                    // * We want to know if the server has any to_device messages queued up
-                    //   for us. We do that by calling it with a zero timeout until it
-                    //   doesn't give us any more to_device messages.
-                    const timeout = this._status.get() === SyncStatus.Syncing ? INCREMENTAL_TIMEOUT : 0; 
-                    const syncResult = await this._syncRequest(syncToken, timeout, log);
-                    syncToken = syncResult.syncToken;
-                    roomStates = syncResult.roomStates;
-                    sessionChanges = syncResult.sessionChanges;
-                    // initial sync or catchup sync
-                    if (this._status.get() !== SyncStatus.Syncing && syncResult.hadToDeviceMessages) {
-                        this._status.set(SyncStatus.CatchupSync);
+            let wasCatchupOrInitial =
+                this._status.get() === SyncStatus.CatchupSync || this._status.get() === SyncStatus.InitialSync;
+            await this._logger.run(
+                "sync",
+                async (log) => {
+                    log.set("token", syncToken);
+                    log.set("status", this._status.get());
+                    try {
+                        // unless we are happily syncing already, we want the server to return
+                        // as quickly as possible, even if there are no events queued. This
+                        // serves two purposes:
+                        //
+                        // * When the connection dies, we want to know asap when it comes back,
+                        //   so that we can hide the error from the user. (We don't want to
+                        //   have to wait for an event or a timeout).
+                        //
+                        // * We want to know if the server has any to_device messages queued up
+                        //   for us. We do that by calling it with a zero timeout until it
+                        //   doesn't give us any more to_device messages.
+                        const timeout = this._status.get() === SyncStatus.Syncing ? INCREMENTAL_TIMEOUT : 0;
+                        const syncResult = await this._syncRequest(syncToken, timeout, log);
+                        syncToken = syncResult.syncToken;
+                        roomStates = syncResult.roomStates;
+                        sessionChanges = syncResult.sessionChanges;
+                        // initial sync or catchup sync
+                        if (this._status.get() !== SyncStatus.Syncing && syncResult.hadToDeviceMessages) {
+                            this._status.set(SyncStatus.CatchupSync);
+                        } else {
+                            this._status.set(SyncStatus.Syncing);
+                        }
+                    } catch (err) {
+                        // retry same request on timeout
+                        if (err.name === "ConnectionError" && err.isTimeout) {
+                            // don't run afterSyncCompleted
+                            return;
+                        }
+                        this._error = err;
+                        if (err.name !== "AbortError") {
+                            // sync wasn't asked to stop, but is stopping
+                            // because of the error.
+                            log.error = err;
+                            log.logLevel = log.level.Fatal;
+                        }
+                        log.set("stopping", true);
+                        this._status.set(SyncStatus.Stopped);
+                    }
+                    if (this._status.get() !== SyncStatus.Stopped) {
+                        // TODO: if we're not going to run this phase in parallel with the next
+                        // sync request (because this causes OTKs to be uploaded twice)
+                        // should we move this inside _syncRequest?
+                        // Alternatively, we can try to fix the OTK upload issue while still
+                        // running in parallel.
+                        await log.wrap("afterSyncCompleted", (log) =>
+                            this._runAfterSyncCompleted(sessionChanges, roomStates, log),
+                        );
+                    }
+                },
+                this._logger.level.Info,
+                (filter, log) => {
+                    if (log.durationWithoutType("network") >= 2000 || log.error || wasCatchupOrInitial) {
+                        return filter.minLevel(log.level.Detail);
                     } else {
-                        this._status.set(SyncStatus.Syncing);
+                        return filter.minLevel(log.level.Info);
                     }
-                } catch (err) {
-                    // retry same request on timeout
-                    if (err.name === "ConnectionError" && err.isTimeout) {
-                        // don't run afterSyncCompleted
-                        return;
-                    }
-                    this._error = err;
-                    if (err.name !== "AbortError") {
-                        // sync wasn't asked to stop, but is stopping
-                        // because of the error.
-                        log.error = err;
-                        log.logLevel = log.level.Fatal;
-                    }
-                    log.set("stopping", true);
-                    this._status.set(SyncStatus.Stopped);
-                }
-                if (this._status.get() !== SyncStatus.Stopped) {
-                    // TODO: if we're not going to run this phase in parallel with the next
-                    // sync request (because this causes OTKs to be uploaded twice)
-                    // should we move this inside _syncRequest?
-                    // Alternatively, we can try to fix the OTK upload issue while still
-                    // running in parallel.
-                    await log.wrap("afterSyncCompleted", log => this._runAfterSyncCompleted(sessionChanges, roomStates, log));
-                }
-            },
-            this._logger.level.Info,
-            (filter, log) => {
-                if (log.durationWithoutType("network") >= 2000 || log.error || wasCatchupOrInitial) {
-                    return filter.minLevel(log.level.Detail);
-                } else {
-                    return filter.minLevel(log.level.Info);
-                }
-            });
+                },
+            );
         }
     }
 
@@ -158,10 +159,12 @@ export class Sync {
         const isCatchupSync = this._status.get() === SyncStatus.CatchupSync;
         const sessionPromise = (async () => {
             try {
-                await log.wrap("session", log => this._session.afterSyncCompleted(sessionChanges, isCatchupSync, log));
+                await log.wrap("session", (log) =>
+                    this._session.afterSyncCompleted(sessionChanges, isCatchupSync, log),
+                );
             } catch (err) {} // error is logged, but don't fail sessionPromise
         })();
-        const roomsPromises = roomStates.map(async rs => {
+        const roomsPromises = roomStates.map(async (rs) => {
             try {
                 await rs.room.afterSyncCompleted(rs.changes, log);
             } catch (err) {} // error is logged, but don't fail roomsPromises
@@ -176,57 +179,75 @@ export class Sync {
     async _syncRequest(syncToken, timeout, log) {
         let {syncFilterId} = this._session;
         if (typeof syncFilterId !== "string") {
-            this._currentRequest = this._hsApi.createFilter(this._session.user.id, {room: {state: {lazy_load_members: true}}}, {log});
+            this._currentRequest = this._hsApi.createFilter(
+                this._session.user.id,
+                {room: {state: {lazy_load_members: true}}},
+                {log},
+            );
             syncFilterId = (await this._currentRequest.response()).filter_id;
         }
-        const totalRequestTimeout = timeout + (80 * 1000);  // same as riot-web, don't get stuck on wedged long requests
+        const totalRequestTimeout = timeout + 80 * 1000; // same as riot-web, don't get stuck on wedged long requests
         this._currentRequest = this._hsApi.sync(syncToken, syncFilterId, timeout, {timeout: totalRequestTimeout, log});
         const response = await this._currentRequest.response();
 
         if (window._ras_event) {
             if (response.rooms && response.rooms.join) {
-                Object.entries(response.rooms.join).forEach(
-                    ([roomId, room]) => {
-                        room.ephemeral.events.forEach((event) => {
-                            window._ras_event(roomId, event);
-                        });
-                    }
-                );
+                Object.entries(response.rooms.join).forEach(([roomId, room]) => {
+                    room.ephemeral.events.forEach((event) => {
+                        window._ras_event(roomId, event);
+                    });
+                });
             }
         }
         const isInitialSync = !syncToken;
         const sessionState = new SessionSyncProcessState();
         const inviteStates = this._parseInvites(response.rooms);
         const {roomStates, archivedRoomStates} = await this._parseRoomsResponse(
-            response.rooms, inviteStates, isInitialSync, log);
+            response.rooms,
+            inviteStates,
+            isInitialSync,
+            log,
+        );
 
         try {
             // take a lock on olm sessions used in this sync so sending a message doesn't change them while syncing
             sessionState.lock = await log.wrap("obtainSyncLock", () => this._session.obtainSyncLock(response));
-            await log.wrap("prepare", log => this._prepareSync(sessionState, roomStates, response, log));
-            await log.wrap("afterPrepareSync", log => Promise.all(roomStates.map(rs => {
-                return rs.room.afterPrepareSync(rs.preparation, log);
-            })));
-            await log.wrap("write", async log => this._writeSync(
-                sessionState, inviteStates, roomStates, archivedRoomStates,
-                response, syncFilterId, isInitialSync, log));
+            await log.wrap("prepare", (log) => this._prepareSync(sessionState, roomStates, response, log));
+            await log.wrap("afterPrepareSync", (log) =>
+                Promise.all(
+                    roomStates.map((rs) => {
+                        return rs.room.afterPrepareSync(rs.preparation, log);
+                    }),
+                ),
+            );
+            await log.wrap("write", async (log) =>
+                this._writeSync(
+                    sessionState,
+                    inviteStates,
+                    roomStates,
+                    archivedRoomStates,
+                    response,
+                    syncFilterId,
+                    isInitialSync,
+                    log,
+                ),
+            );
         } finally {
             sessionState.dispose();
         }
         // sync txn comitted, emit updates and apply changes to in-memory state
-        log.wrap("after", log => this._afterSync(
-            sessionState, inviteStates, roomStates, archivedRoomStates, log));
+        log.wrap("after", (log) => this._afterSync(sessionState, inviteStates, roomStates, archivedRoomStates, log));
 
         const toDeviceEvents = response.to_device?.events;
         const presenceEvents = response.presence?.events;
-        
+
         // Handle presence events at session level
         if (presenceEvents?.length) {
             if (this._logger) {
                 this._logger.log({
                     l: "sync_presence_events",
                     count: presenceEvents.length,
-                    events: presenceEvents
+                    events: presenceEvents,
                 });
             }
             for (const event of presenceEvents) {
@@ -236,12 +257,13 @@ export class Sync {
                             l: "processing_presence_event",
                             event,
                             roomCount: roomStates.length,
-                            allRoomsCount: this._session.rooms.size
+                            allRoomsCount: this._session.rooms.size,
                         });
                     }
                     // Update presence in all joined rooms for this user
-                    const joinedRooms = Array.from(this._session.rooms.values())
-                        .filter(room => room.membership === "join");
+                    const joinedRooms = Array.from(this._session.rooms.values()).filter(
+                        (room) => room.membership === "join",
+                    );
 
                     if (joinedRooms.length > 0) {
                         if (this._logger) {
@@ -249,7 +271,7 @@ export class Sync {
                                 l: "updating_room_presence",
                                 userId: event.sender,
                                 presence: event.content.presence,
-                                joinedRoomCount: joinedRooms.length
+                                joinedRoomCount: joinedRooms.length,
                             });
                         }
                         // Update presence in all joined rooms
@@ -272,6 +294,7 @@ export class Sync {
     _openPrepareSyncTxn() {
         const storeNames = this._storage.storeNames;
         return this._storage.readTxn([
+            storeNames.roomMembers,
             storeNames.deviceKeys, // to read device from olm messages
             storeNames.olmSessions,
             storeNames.inboundGroupSessions,
@@ -285,8 +308,9 @@ export class Sync {
 
     async _prepareSync(sessionState, roomStates, response, log) {
         const prepareTxn = await this._openPrepareSyncTxn();
-        sessionState.preparation = await log.wrap("session", log => this._session.prepareSync(
-            response, sessionState.lock, prepareTxn, log));
+        sessionState.preparation = await log.wrap("session", (log) =>
+            this._session.prepareSync(response, sessionState.lock, prepareTxn, log),
+        );
 
         const newKeysByRoom = sessionState.preparation?.newKeysByRoom;
 
@@ -303,45 +327,69 @@ export class Sync {
                 }
             }
         }
-        
-        await Promise.all(roomStates.map(async rs => {
-            const newKeys = newKeysByRoom?.get(rs.room.id);
-            rs.preparation = await log.wrap("room", async log => {
-                // if previously joined and we still have the timeline for it,
-                // this loads the syncWriter at the correct position to continue writing the timeline
-                if (rs.isNewRoom) {
-                    await rs.room.load(null, prepareTxn, log);
-                }
-                return rs.room.prepareSync(
-                    rs.roomResponse, rs.membership, newKeys, prepareTxn, log)
-            }, log.level.Detail);
-        }));
+
+        await Promise.all(
+            roomStates.map(async (rs) => {
+                const newKeys = newKeysByRoom?.get(rs.room.id);
+                rs.preparation = await log.wrap(
+                    "room",
+                    async (log) => {
+                        // if previously joined and we still have the timeline for it,
+                        // this loads the syncWriter at the correct position to continue writing the timeline
+                        if (rs.isNewRoom) {
+                            await rs.room.load(null, prepareTxn, log);
+                        }
+                        return rs.room.prepareSync(rs.roomResponse, rs.membership, newKeys, prepareTxn, log);
+                    },
+                    log.level.Detail,
+                );
+            }),
+        );
 
         // This is needed for safari to not throw TransactionInactiveErrors on the syncTxn. See docs/INDEXEDDB.md
         await prepareTxn.complete();
     }
 
-    async _writeSync(sessionState, inviteStates, roomStates, archivedRoomStates, response, syncFilterId, isInitialSync, log) {
+    async _writeSync(
+        sessionState,
+        inviteStates,
+        roomStates,
+        archivedRoomStates,
+        response,
+        syncFilterId,
+        isInitialSync,
+        log,
+    ) {
         const syncTxn = await this._openSyncTxn();
         try {
-            sessionState.changes = await log.wrap("session", log => this._session.writeSync(
-                response, syncFilterId, sessionState.preparation, syncTxn, log));
-            await Promise.all(inviteStates.map(async is => {
-                is.changes = await log.wrap("invite", log => is.invite.writeSync(
-                    is.membership, is.roomResponse, syncTxn, log));
-            }));
-            await Promise.all(roomStates.map(async rs => {
-                rs.changes = await log.wrap("room", log => rs.room.writeSync(
-                    rs.roomResponse, isInitialSync, rs.preparation, syncTxn, log));
-            }));
+            sessionState.changes = await log.wrap("session", (log) =>
+                this._session.writeSync(response, syncFilterId, sessionState.preparation, syncTxn, log),
+            );
+            await Promise.all(
+                inviteStates.map(async (is) => {
+                    is.changes = await log.wrap("invite", (log) =>
+                        is.invite.writeSync(is.membership, is.roomResponse, syncTxn, log),
+                    );
+                }),
+            );
+            await Promise.all(
+                roomStates.map(async (rs) => {
+                    rs.changes = await log.wrap("room", (log) =>
+                        rs.room.writeSync(rs.roomResponse, isInitialSync, rs.preparation, syncTxn, log),
+                    );
+                }),
+            );
             // important to do this after roomStates,
             // as we're referring to the roomState to get the summaryChanges
-            await Promise.all(archivedRoomStates.map(async ars => {
-                const summaryChanges = ars.roomState?.summaryChanges;
-                ars.changes = await log.wrap("archivedRoom", log => ars.archivedRoom.writeSync(
-                    summaryChanges, ars.roomResponse, ars.membership, syncTxn, log));
-            }));
-        } catch(err) {
+            await Promise.all(
+                archivedRoomStates.map(async (ars) => {
+                    const summaryChanges = ars.roomState?.summaryChanges;
+                    ars.changes = await log.wrap("archivedRoom", (log) =>
+                        ars.archivedRoom.writeSync(summaryChanges, ars.roomResponse, ars.membership, syncTxn, log),
+                    );
+                }),
+            );
+        } catch (err) {
             // avoid corrupting state by only
             // storing the sync up till the point
             // the exception occurred
@@ -352,18 +400,22 @@ export class Sync {
     }
 
     _afterSync(sessionState, inviteStates, roomStates, archivedRoomStates, log) {
-        log.wrap("session", log => this._session.afterSync(sessionState.changes, log), log.level.Detail);
-        for(let ars of archivedRoomStates) {
-            log.wrap("archivedRoom", log => {
-                ars.archivedRoom.afterSync(ars.changes, log);
-                ars.archivedRoom.release();
-            }, log.level.Detail);
+        log.wrap("session", (log) => this._session.afterSync(sessionState.changes, log), log.level.Detail);
+        for (let ars of archivedRoomStates) {
+            log.wrap(
+                "archivedRoom",
+                (log) => {
+                    ars.archivedRoom.afterSync(ars.changes, log);
+                    ars.archivedRoom.release();
+                },
+                log.level.Detail,
+            );
         }
-        for(let rs of roomStates) {
-            log.wrap("room", log => rs.room.afterSync(rs.changes, log), log.level.Detail);
+        for (let rs of roomStates) {
+            log.wrap("room", (log) => rs.room.afterSync(rs.changes, log), log.level.Detail);
         }
-        for(let is of inviteStates) {
-            log.wrap("invite", log => is.invite.afterSync(is.changes, log), log.level.Detail);
+        for (let is of inviteStates) {
+            log.wrap("invite", (log) => is.invite.afterSync(is.changes, log), log.level.Detail);
         }
         this._session.applyRoomCollectionChangesAfterSync(inviteStates, roomStates, archivedRoomStates, log);
     }
@@ -395,13 +447,13 @@ export class Sync {
             storeNames.calls,
         ]);
     }
-    
+
     async _parseRoomsResponse(roomsSection, inviteStates, isInitialSync, log) {
         const roomStates = [];
         const archivedRoomStates = [];
         if (roomsSection) {
             const allMemberships = ["join", "leave"];
-            for(const membership of allMemberships) {
+            for (const membership of allMemberships) {
                 const membershipSection = roomsSection[membership];
                 if (membershipSection) {
                     for (const [roomId, roomResponse] of Object.entries(membershipSection)) {
@@ -420,7 +472,14 @@ export class Sync {
                         if (roomState) {
                             roomStates.push(roomState);
                         }
-                        const ars = await this._createArchivedRoomSyncState(roomId, roomState, roomResponse, membership, isInitialSync, log);
+                        const ars = await this._createArchivedRoomSyncState(
+                            roomId,
+                            roomState,
+                            roomResponse,
+                            membership,
+                            isInitialSync,
+                            log,
+                        );
                         if (ars) {
                             archivedRoomStates.push(ars);
                         }
@@ -446,8 +505,7 @@ export class Sync {
             isNewRoom = true;
         }
         if (room) {
-            return new RoomSyncProcessState(
-                room, isNewRoom, roomResponse, membership);
+            return new RoomSyncProcessState(room, isNewRoom, roomResponse, membership);
         }
     }
 
@@ -472,8 +530,7 @@ export class Sync {
             }
         }
         if (archivedRoom) {
-            return new ArchivedRoomSyncProcessState(
-                archivedRoom, roomState, roomResponse, membership);
+            return new ArchivedRoomSyncProcessState(archivedRoom, roomState, roomResponse, membership);
         }
     }
 
@@ -543,7 +600,6 @@ class RoomSyncProcessState {
         return this.changes?.summaryChanges;
     }
 }
-
 
 class ArchivedRoomSyncProcessState {
     constructor(archivedRoom, roomState, roomResponse, membership, isInitialSync) {
