@@ -36,18 +36,55 @@ export class LightboxViewModel extends ViewModel {
     }
 
     async _loadEvent(room, eventEntry) {
+        console.log("[LightboxViewModel] _loadEvent called", {
+            hasEventEntry: !!eventEntry,
+            eventId: eventEntry?.event?.event_id,
+            type: eventEntry?.event?.type
+        });
+        
         if (!eventEntry) {
+            console.warn("[LightboxViewModel] No event entry provided");
             return;
         }
+        
         const {mediaRepository} = room;
         this._eventEntry = eventEntry;
         const {content} = this._eventEntry;
-        this._date = this._eventEntry.timestamp ? new Date(this._eventEntry.timestamp) : null;
-        if (content.url) {
-            this._unencryptedImageUrl = mediaRepository.mxcUrl(content.url);
-            this.emitChange("imageUrl");
-        } else if (content.file) {
-            this._decryptedImage = this.track(await mediaRepository.downloadEncryptedFile(content.file));
+        
+        console.log("[LightboxViewModel] Event content:", {
+            hasUrl: !!content?.url,
+            hasFile: !!content?.file,
+            contentKeys: Object.keys(content || {}),
+            mimeType: content?.info?.mimetype,
+            size: content?.info?.size
+        });
+        
+        this._date = this._eventEntry.event?.origin_server_ts ? new Date(this._eventEntry.event.origin_server_ts) : null;
+        console.log("[LightboxViewModel] Timestamp:", {
+            originServerTs: this._eventEntry.event?.origin_server_ts,
+            date: this._date
+        });
+        
+        try {
+            if (content?.url) {
+                console.log("[LightboxViewModel] Processing unencrypted image URL");
+                this._unencryptedImageUrl = mediaRepository.mxcUrl(content.url);
+                console.log("[LightboxViewModel] Unencrypted URL set to:", this._unencryptedImageUrl);
+                this.emitChange("imageUrl");
+            } else if (content?.file) {
+                console.log("[LightboxViewModel] Processing encrypted file");
+                this._decryptedImage = this.track(await mediaRepository.downloadEncryptedFile(content.file));
+                console.log("[LightboxViewModel] Decrypted image result:", {
+                    hasUrl: !!this._decryptedImage?.url,
+                    blob: this._decryptedImage?.blob
+                });
+                this.emitChange("imageUrl");
+            } else {
+                console.warn("[LightboxViewModel] No URL or file found in content");
+            }
+        } catch (error) {
+            console.error("[LightboxViewModel] Error loading image:", error);
+            // Still emit change to update UI with error state if needed
             this.emitChange("imageUrl");
         }
     }
@@ -65,10 +102,17 @@ export class LightboxViewModel extends ViewModel {
     }
 
     get sender() {
-        return this._eventEntry?.displayName;
+        return this._eventEntry?.sender;
     }
 
     get imageUrl() {
+        console.log("[LightboxViewModel] Getting imageUrl", {
+            hasDecryptedImage: !!this._decryptedImage,
+            hasUnencryptedUrl: !!this._unencryptedImageUrl,
+            decryptedUrl: this._decryptedImage?.url,
+            unencryptedUrl: this._unencryptedImageUrl
+        });
+        
         if (this._decryptedImage) {
             return this._decryptedImage.url;
         } else if (this._unencryptedImageUrl) {
@@ -79,11 +123,23 @@ export class LightboxViewModel extends ViewModel {
     }
 
     get date() {
-        return this._date && this._date.toLocaleDateString({}, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        if (!this._eventEntry?.timestamp) {
+            return "";
+        }
+        if (!this._date) {
+            this._date = new Date(this._eventEntry.timestamp);
+        }
+        return this._date.toLocaleDateString({}, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     }
 
     get time() {
-        return this._date && this._date.toLocaleTimeString({}, {hour: "numeric", minute: "2-digit"});
+        if (!this._eventEntry?.timestamp) {
+            return "";
+        }
+        if (!this._date) {
+            this._date = new Date(this._eventEntry.timestamp);
+        }
+        return this._date.toLocaleTimeString({}, {hour: "numeric", minute: "2-digit"});
     }
 
     get closeUrl() {

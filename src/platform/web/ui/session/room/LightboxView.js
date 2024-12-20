@@ -28,7 +28,11 @@ export class LightboxView extends TemplateView {
                 picture: true,
                 hidden: vm => !vm.imageUrl,
             },
-            style: vm => `background-image: url('${vm.imageUrl}'); max-width: ${vm.imageWidth}px; max-height: ${vm.imageHeight}px;`
+            style: vm => vm.imageUrl ? `background-image: url('${vm.imageUrl}'); width: 90vw; height: 90vh; background-size: contain; background-position: center; background-repeat: no-repeat;` : "",
+            onError: evt => {
+                console.error("[LightboxView] Error loading image:", evt);
+                evt.target.classList.add("error");
+            }
         });
         const loading = t.div({
             className: {

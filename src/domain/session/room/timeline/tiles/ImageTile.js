@@ -20,18 +20,48 @@ import {BaseMediaTile} from "./BaseMediaTile.js";
 export class ImageTile extends BaseMediaTile {
     constructor(entry, options) {
         super(entry, options);
-        this._lightboxUrl = this.urlRouter.urlForSegments([
-            // ensure the right room is active if in grid view
-            this.navigation.segment("room", this._room.id),
-            this.navigation.segment("lightbox", this._entry.id)
-        ]);
+        this._showInLightbox = true;  // Always enable lightbox
+        console.log('ImageTile constructor', {
+            entry,
+            showInLightbox: this._showInLightbox,
+            isPending: this.isPending
+        });
     }
 
-    get lightboxUrl() {
-        if (!this.isPending) {
-            return this._lightboxUrl;
+    get showInLightbox() {
+        console.log('ImageTile.showInLightbox called', this._showInLightbox);
+        return this._showInLightbox;
+    }
+
+    get eventId() {
+        return this._entry.id;
+    }
+
+    get roomId() {
+        return this._room.id;
+    }
+
+    // Get the full-size image URL for the lightbox
+    get lightboxImageUrl() {
+        if (this._decryptedFile) {
+            return this._decryptedFile.url;
         }
-        return "";
+        const content = this._getContent();
+        const mxcUrl = content?.url;
+        if (typeof mxcUrl === "string") {
+            // Use the original size for lightbox
+            return this._mediaRepository.mxcUrl(mxcUrl);
+        }
+        // Fallback to thumbnail if full image not available
+        return this.thumbnailUrl;
+    }
+
+    get sender() {
+        return this._entry.sender;
+    }
+
+    get timestamp() {
+        return this._entry.timestamp;
     }
 
     get shape() {
