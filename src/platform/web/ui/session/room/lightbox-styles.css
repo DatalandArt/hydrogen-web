@@ -1,0 +1,91 @@
+.lightbox {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.9);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    overflow: auto;
+    display: grid;
+    gap: 0.5rem;
+    grid-template:
+        "close" auto
+        "content" 1fr
+        "details" auto;
+    overflow: auto;
+    padding-bottom: 20px;
+    padding-top: 20px;
+}
+
+.lightbox .picture {
+    max-width: 100vw;
+    max-height: 80vh;
+    width: 100%;
+    object-fit: contain;
+    justify-self: center;
+}
+
+.lightbox .details {
+    color: rgba(178, 178, 178, 1);
+    left: 20px;
+    word-break: break-word;
+    display: grid;
+    background: rgba(33, 33, 33, 0.7);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+    padding: 10px;
+    grid-area: details;
+    width: 100%;
+    max-width: 33rem;
+    justify-self: center;
+    left: 0px;
+    bottom: unset;
+    position: relative;
+}
+
+.lightbox .details strong {
+    font-weight: 400;
+    color: rgba(255, 255, 255, 1);
+}
+
+.lightbox .close {
+    position: fixed;
+    top: 0px;
+    right: 20px;
+    color: white;
+    font-size: 2rem;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.lightbox .close::before {
+    content: "×";
+}
+
+.lightbox .loading {
+    color: white;
+    text-align: center;
+}
+
+.lightbox .hidden {
+    display: none;
+}
+
+/* Handle portrait orientation */
+@media (max-aspect-ratio: 1/1) {
+    .lightbox {
+        padding-top: 0px;
+    }
+
+    .lightbox .close {
+        position: relative;
+        grid-area: close;
+        justify-self: end;
+        right: 0;
+        top: 0;
+    }
+}

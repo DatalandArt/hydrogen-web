@@ -15,6 +15,7 @@ limitations under the License.
 */
 
 import {BaseMediaView} from "./BaseMediaView.js";
+import {LightboxView} from "../LightboxView.js";
 import "./image-styles.css";
 
 export class ImageView extends BaseMediaView {
@@ -65,57 +66,41 @@ export class ImageView extends BaseMediaView {
                         timestamp: tile.timestamp
                     });
 
-                    // Emit a custom event that can be caught by the parent component
-                    const lightboxEvent = new CustomEvent('hydrogen:lightbox', {
-                        bubbles: true,
-                        composed: true,  // Allow event to cross shadow DOM boundary
-                        detail: {
-                            eventId: tile.eventId,
-                            roomId: tile.roomId,
-                            thumbnailUrl: tile.thumbnailUrl,
-                            imageUrl: tile.lightboxImageUrl,
-                            label: tile.label,
-                            sender: tile.sender,
-                            timestamp: tile.timestamp
-                        }
-                    });
-                    // Only log essential properties from event detail
-                    log.set("eventDetail", {
-                        eventId: lightboxEvent.detail.eventId,
-                        roomId: lightboxEvent.detail.roomId,
-                        sender: lightboxEvent.detail.sender,
-                        timestamp: lightboxEvent.detail.timestamp
-                    });
-
-                    // Try dispatching from both the target and the anchor element
-                    evt.target.dispatchEvent(lightboxEvent);
-                    evt.currentTarget.dispatchEvent(lightboxEvent);
-                    // Also try dispatching from the root element
-                    this.root().dispatchEvent(lightboxEvent);
-
-                    // As a fallback, try creating the lightbox directly
-                    try {
-                        const LightboxView = require('./LightboxView.js').LightboxView;
-                        const lightboxVM = {
-                            imageUrl: tile.lightboxImageUrl || tile.thumbnailUrl,
-                            name: tile.label,
-                            sender: tile.sender,
-                            time: new Date(tile.timestamp).toLocaleTimeString(),
-                            date: new Date(tile.timestamp).toLocaleDateString(),
-                            close: () => {
-                                const lightboxElement = document.querySelector('.lightbox');
-                                if (lightboxElement) {
-                                    lightboxElement.remove();
-                                }
+                    // Create and show the lightbox
+                    const lightboxVM = {
+                        imageUrl: tile.lightboxImageUrl || tile.thumbnailUrl,
+                        name: tile.label || "Image",
+                        sender: tile.sender,
+                        time: new Date(tile.timestamp).toLocaleTimeString(),
+                        date: new Date(tile.timestamp).toLocaleDateString(),
+                        close: () => {
+                            const lightboxElement = document.querySelector('.lightbox');
+                            if (lightboxElement) {
+                                lightboxElement.remove();
                             }
-                        };
+                        }
+                    };
+
+                    // Log lightbox details
+                    log.set("lightboxDetails", {
+                        imageUrl: lightboxVM.imageUrl,
+                        sender: lightboxVM.sender,
+                        time: lightboxVM.time,
+                        date: lightboxVM.date
+                    });
+
+                    try {
                         const lightboxView = new LightboxView(lightboxVM);
-                        document.body.appendChild(lightboxView.mount());
+                        const mountedView = lightboxView.mount();
+                        document.body.appendChild(mountedView);
                         log.log({l: "Created and mounted lightbox view"}, log.level.Detail);
                     } catch (err) {
                         log.error = err;
-                        log.log({l: "Failed to create lightbox directly"}, log.level.Error);
+                        log.log({l: "Failed to create lightbox"}, log.level.Error);
+                        console.error("Failed to create lightbox:", err);
                     }
+                    
+                    log.log({l: "Dispatched lightbox event"}, log.level.Detail);
                 });
             }
         }, img);

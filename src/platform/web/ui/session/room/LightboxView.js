@@ -16,19 +16,23 @@ limitations under the License.
 
 import {TemplateView} from "../../general/TemplateView";
 import {spinner} from "../../common.js";
+import "./lightbox-styles.css";
 
 export class LightboxView extends TemplateView {
     render(t, vm) {
-        const close = t.a({href: vm.closeUrl, title: vm.i18n`Close`, className: "close"});
-        const image = t.div({
-            role: "img",
-            "aria-label": vm => vm.name,
+        const close = t.a({href: "#", title: "Close", className: "close", onClick: evt => {
+            evt.preventDefault();
+            vm.close();
+        }});
+        const image = t.img({
+            src: vm => vm.imageUrl,
+            alt: vm => vm.name,
             title: vm => vm.name,
             className: {
                 picture: true,
                 hidden: vm => !vm.imageUrl,
             },
-            style: vm => vm.imageUrl ? `background-image: url('${vm.imageUrl}'); width: 90vw; height: 90vh; background-size: contain; background-position: center; background-repeat: no-repeat;` : "",
+            style: "max-width: 90vw; max-height: 90vh; object-fit: contain;",
             onError: evt => {
                 console.error("[LightboxView] Error loading image:", evt);
                 evt.target.classList.add("error");
@@ -41,7 +45,7 @@ export class LightboxView extends TemplateView {
             }
         }, [
             spinner(t),
-            t.div(vm.i18n`Loading image…`)
+            t.div("Loading image...")
         ]);
         const details = t.div({
             className: "details"
