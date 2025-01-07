@@ -28,6 +28,7 @@
     width: 100%;
     object-fit: contain;
     justify-self: center;
+    grid-area: content;
 }
 
 .lightbox .details {
