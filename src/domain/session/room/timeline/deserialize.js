@@ -14,7 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import { MessageBody, HeaderBlock, TableBlock, ListBlock, CodeBlock, PillPart, FormatPart, NewLinePart, RulePart, TextPart, LinkPart, ImagePart } from "./MessageBody.js"
+import {
+    MessageBody,
+    HeaderBlock,
+    TableBlock,
+    ListBlock,
+    CodeBlock,
+    PillPart,
+    FormatPart,
+    NewLinePart,
+    RulePart,
+    TextPart,
+    LinkPart,
+    ImagePart,
+} from "./MessageBody.js";
 import {linkify} from "./linkify/linkify";
 
 /* At the time of writing (Jul 1 2021), Matrix Spec recommends
@@ -27,10 +40,10 @@ import {linkify} from "./linkify/linkify";
  * Nodes that don't have any properties to them other than their tag.
  * While <a> has `href`, and <img> has `src`, these have... themselves.
  */
-const basicInline = ["EM", "STRONG", "CODE", "DEL", "SPAN" ];
+const basicInline = ["EM", "STRONG", "CODE", "DEL", "SPAN"];
 const basicBlock = ["DIV", "BLOCKQUOTE"];
-const safeSchemas = ["https", "http", "ftp", "mailto", "magnet"].map(name => `${name}://`);
-const baseUrl = 'https://matrix.to';
+const safeSchemas = ["https", "http", "ftp", "mailto", "magnet"].map((name) => `${name}://`);
+const baseUrl = "https://matrix.to";
 const linkPrefix = `${baseUrl}/#/`;
 
 class Deserializer {
@@ -44,7 +57,7 @@ class Deserializer {
             return null;
         }
         const contents = link.substring(linkPrefix.length);
-        if (contents[0] === '@') {
+        if (contents[0] === "@") {
             return contents;
         }
         return null;
@@ -54,7 +67,7 @@ class Deserializer {
         const href = this.result.getAttributeValue(node, "href");
         const lcUrl = href?.toLowerCase();
         // urls should be absolute and with a safe schema, as listed in the spec
-        if (!lcUrl || !safeSchemas.some(schema => lcUrl.startsWith(schema))) {
+        if (!lcUrl || !safeSchemas.some((schema) => lcUrl.startsWith(schema))) {
             return new FormatPart("span", children);
         }
         const pillId = this.parsePillLink(href);
@@ -83,9 +96,7 @@ class Deserializer {
     }
 
     _ensureElement(node, tag) {
-        return node &&
-            this.result.isElementNode(node) &&
-            this.result.getNodeElementName(node) === tag;
+        return node && this.result.isElementNode(node) && this.result.getNodeElementName(node) === tag;
     }
 
     parseCodeBlock(node) {
@@ -99,10 +110,10 @@ class Deserializer {
         if (!this._ensureElement(codeNode, "CODE")) {
             return new CodeBlock(language, this.result.getNodeText(node));
         }
-        const cl = result.getAttributeValue(codeNode, "class") || ""
+        const cl = result.getAttributeValue(codeNode, "class") || "";
         for (const clname of cl.split(" ")) {
             if (clname.startsWith("language-") && !clname.startsWith("language-_")) {
-                language = clname.substring(9) // "language-".length
+                language = clname.substring(9); // "language-".length
                 break;
             }
         }
@@ -127,7 +138,7 @@ class Deserializer {
     parseTableRow(row, tag) {
         const cells = [];
         for (const node of this.result.getChildNodes(row)) {
-            if(!this._ensureElement(node, tag)) {
+            if (!this._ensureElement(node, tag)) {
                 continue;
             }
             const children = this.result.getChildNodes(node);
@@ -138,13 +149,12 @@ class Deserializer {
     }
 
     parseTableHead(head) {
-        let headRow = null;
-        for (const node of this.result.getChildNodes(head)) {
-            headRow = node;
-            break;
-        }
-        if (this._ensureElement(headRow, "TR")) {
-            return this.parseTableRow(headRow, "TH");
+        const rows = Array.from(this.result.getChildNodes(head)).filter((node) => this._ensureElement(node, "TR"));
+        if (rows.length) {
+            const headerCells = this.parseTableRow(rows[0], "TH");
+            if (headerCells && headerCells.length) {
+                return headerCells;
+            }
         }
         return null;
     }
@@ -152,26 +162,54 @@ class Deserializer {
     parseTableBody(body) {
         const rows = [];
         for (const node of this.result.getChildNodes(body)) {
-            if(!this._ensureElement(node, "TR")) {
+            if (!this._ensureElement(node, "TR")) {
                 continue;
             }
-            rows.push(this.parseTableRow(node, "TD"));
+            const row = this.parseTableRow(node, "TD");
+            if (row && row.length > 0) {
+                rows.push(row);
+            }
         }
-        return rows;
+        return rows.length ? rows : null;
     }
 
     parseTable(node) {
-        // We are only assuming iterable, so convert to arrary for indexing.
+        // We are only assuming iterable, so convert to array for indexing.
         const children = Array.from(this.result.getChildNodes(node));
-        let head, body;
-        if (this._ensureElement(children[0], "THEAD") && this._ensureElement(children[1], "TBODY")) {
-            head = this.parseTableHead(children[0]);
-            body = this.parseTableBody(children[1]);
-        } else if (this._ensureElement(children[0], "TBODY")) {
-            head = null;
-            body = this.parseTableBody(children[0]);
+        let head = null;
+        let body = [];
+
+        // Try to parse thead/tbody structure
+        if (children.length >= 1) {
+            // First try to find thead and tbody
+            const theadNode = children.find((child) => this._ensureElement(child, "THEAD"));
+            const tbodyNode = children.find((child) => this._ensureElement(child, "TBODY"));
+
+            if (theadNode) {
+                head = this.parseTableHead(theadNode);
+            }
+
+            if (tbodyNode) {
+                const parsedBody = this.parseTableBody(tbodyNode);
+                if (Array.isArray(parsedBody)) {
+                    body = parsedBody;
+                }
+            }
+
+            // If no thead/tbody found, treat direct tr children as body
+            if (!tbodyNode && !theadNode) {
+                const rows = children.filter((child) => this._ensureElement(child, "TR"));
+                if (rows.length) {
+                    body = rows.map((row) => this.parseTableRow(row, "TD")).filter((row) => row && row.length);
+                }
+            }
         }
-        return new TableBlock(head, body);
+
+        // Only return valid tables that have content
+        if ((head && head.length) || (body && body.length)) {
+            return new TableBlock(head, body);
+        }
+        return null;
     }
 
     /** Once a node is known to be an element,
@@ -231,7 +269,7 @@ class Deserializer {
             case "H5":
             case "H6": {
                 const inlines = this.parseInlineNodes(children);
-                return new HeaderBlock(parseInt(tag[1]), inlines)
+                return new HeaderBlock(parseInt(tag[1]), inlines);
             }
             case "UL":
             case "OL":
@@ -247,7 +285,12 @@ class Deserializer {
                 return new FormatPart(tag, inlines);
             }
             case "TABLE":
-                return this.parseTable(node);
+                const table = this.parseTable(node);
+                // Only return valid tables that have either a header or body content
+                if (table && (table.head || (table.body && table.body.length))) {
+                    return table;
+                }
+                return null;
             default: {
                 if (!basicBlock.includes(tag)) {
                     return null;
@@ -271,7 +314,7 @@ class Deserializer {
     }
 
     _parseTextParts(node, into) {
-        if(!this.result.isTextNode(node)) {
+        if (!this.result.isTextNode(node)) {
             return false;
         }
 
@@ -351,7 +394,6 @@ export function parseHTMLBody(platform, mediaRepository, html) {
     return new MessageBody(html, parts);
 }
 
-
 export async function tests() {
     // don't import node-html-parser until it's safe to assume we're actually in a unit test,
     // as this is a devDependency
@@ -397,7 +439,7 @@ export async function tests() {
     }
 
     const platform = {
-        parseHTML: (html) => new HTMLParseResult(parse(html))
+        parseHTML: (html) => new HTMLParseResult(parse(html)),
     };
 
     function test(assert, input, output) {
@@ -405,109 +447,79 @@ export async function tests() {
     }
 
     return {
-        "Text only": assert => {
+        "Text only": (assert) => {
             const input = "This is a sentence";
             const output = [new TextPart(input)];
             test(assert, input, output);
         },
-        "Text with inline code format": assert => {
+        "Text with inline code format": (assert) => {
             const input = "Here's <em>some</em> <code>code</code>!";
             const output = [
                 new TextPart("Here's "),
                 new FormatPart("em", [new TextPart("some")]),
                 new TextPart(" "),
                 new FormatPart("code", [new TextPart("code")]),
-                new TextPart("!")
+                new TextPart("!"),
             ];
             test(assert, input, output);
         },
-        "Text with ordered list with no attributes": assert => {
+        "Text with ordered list with no attributes": (assert) => {
             const input = "<ol><li>Lorem</li><li>Ipsum</li></ol>";
-            const output = [
-                new ListBlock(1, [
-                    [ new TextPart("Lorem") ],
-                    [ new TextPart("Ipsum") ]
-                ])
-            ];
+            const output = [new ListBlock(1, [[new TextPart("Lorem")], [new TextPart("Ipsum")]])];
             test(assert, input, output);
         },
-        "Text with ordered list starting at 3": assert => {
+        "Text with ordered list starting at 3": (assert) => {
             const input = '<ol start="3"><li>Lorem</li><li>Ipsum</li></ol>';
-            const output = [
-                new ListBlock(3, [
-                    [ new TextPart("Lorem") ],
-                    [ new TextPart("Ipsum") ]
-                ])
-            ];
+            const output = [new ListBlock(3, [[new TextPart("Lorem")], [new TextPart("Ipsum")]])];
             test(assert, input, output);
         },
-        "Text with unordered list": assert => {
+        "Text with unordered list": (assert) => {
             const input = '<ul start="3"><li>Lorem</li><li>Ipsum</li></ul>';
-            const output = [
-                new ListBlock(null, [
-                    [ new TextPart("Lorem") ],
-                    [ new TextPart("Ipsum") ]
-                ])
-            ];
+            const output = [new ListBlock(null, [[new TextPart("Lorem")], [new TextPart("Ipsum")]])];
             test(assert, input, output);
         },
-        "Auto-closed tags": assert => {
-            const input = '<p>hello<p>world</p></p>';
-            const output = [
-                new FormatPart("p", [new TextPart("hello")]),
-                new FormatPart("p", [new TextPart("world")])
-            ];
+        "Auto-closed tags": (assert) => {
+            const input = "<p>hello<p>world</p></p>";
+            const output = [new FormatPart("p", [new TextPart("hello")]), new FormatPart("p", [new TextPart("world")])];
             test(assert, input, output);
         },
-        "Block elements ignored inside inline elements": assert => {
-            const input = '<span><p><code>Hello</code></p></span>';
-            const output = [
-                new FormatPart("span", [new FormatPart("code", [new TextPart("Hello")])])
-            ];
+        "Block elements ignored inside inline elements": (assert) => {
+            const input = "<span><p><code>Hello</code></p></span>";
+            const output = [new FormatPart("span", [new FormatPart("code", [new TextPart("Hello")])])];
             test(assert, input, output);
         },
-        "Unknown tags are ignored, but their children are kept": assert => {
-            const input = '<span><dfn><code>Hello</code></dfn><footer><em>World</em></footer></span>';
+        "Unknown tags are ignored, but their children are kept": (assert) => {
+            const input = "<span><dfn><code>Hello</code></dfn><footer><em>World</em></footer></span>";
             const output = [
                 new FormatPart("span", [
                     new FormatPart("code", [new TextPart("Hello")]),
-                    new FormatPart("em", [new TextPart("World")])
-                ])
+                    new FormatPart("em", [new TextPart("World")]),
+                ]),
             ];
             test(assert, input, output);
         },
-        "Unknown and invalid attributes are stripped": assert => {
+        "Unknown and invalid attributes are stripped": (assert) => {
             const input = '<em onmouseover=alert("Bad code!")>Hello</em>';
-            const output = [
-                new FormatPart("em", [new TextPart("Hello")])
-            ];
+            const output = [new FormatPart("em", [new TextPart("Hello")])];
             test(assert, input, output);
         },
-        "Text with code block but no <code> tag": assert => {
-            const code = 'main :: IO ()\nmain = putStrLn "Hello"'
+        "Text with code block but no <code> tag": (assert) => {
+            const code = 'main :: IO ()\nmain = putStrLn "Hello"';
             const input = `<pre>${code}</pre>`;
-            const output = [
-                new CodeBlock(null, code)
-            ];
+            const output = [new CodeBlock(null, code)];
             test(assert, input, output);
         },
-        "Text with code block and 'unsupported' tag": assert => {
-            const code = '<em>Hello, world</em>'
+        "Text with code block and 'unsupported' tag": (assert) => {
+            const code = "<em>Hello, world</em>";
             const input = `<pre>${code}</pre>`;
-            const output = [
-                new CodeBlock(null, code)
-            ];
+            const output = [new CodeBlock(null, code)];
             test(assert, input, output);
         },
-        "Reply fallback is always stripped": assert => {
-            const input = 'Hello, <em><mx-reply>World</mx-reply></em>!';
-            const output = [
-                new TextPart('Hello, '),
-                new FormatPart("em", []),
-                new TextPart('!'),
-            ];
+        "Reply fallback is always stripped": (assert) => {
+            const input = "Hello, <em><mx-reply>World</mx-reply></em>!";
+            const output = [new TextPart("Hello, "), new FormatPart("em", []), new TextPart("!")];
             assert.deepEqual(parseHTMLBody(platform, null, input), new MessageBody(input, output));
-        }
+        },
         /* Doesnt work: HTML library doesn't handle <pre><code> properly.
         "Text with code block": assert => {
             const code = 'main :: IO ()\nmain = putStrLn "Hello"'
