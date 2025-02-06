@@ -61,5 +61,4 @@ export class Presence {
             this._currentlyActive = event.currently_active;
         }
     }
-console.log("Presence.handlePresenceEvent", event);
 }
